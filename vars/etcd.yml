@@ -1,0 +1,8 @@
+---
+ETCD_VER: v3.3.8
+GOOGLE_URL: https://storage.googleapis.com/etcd
+GITHUB_URL: https://github.com/coreos/etcd/releases/download
+DOWNLOAD_URL: "{{ GITHUB_URL}}"
+ETCD_ZIP: "etcd-{{ETCD_VER}}-linux-amd64.tar.gz"
+ETCD_DOWNLOAD_URL: "https://github.com/coreos/etcd/releases/download/v3.3.8/etcd-v3.3.8-linux-amd64.tar.gz"
+ETCD_DIR: "etcd-v3.3.8-linux-amd64"

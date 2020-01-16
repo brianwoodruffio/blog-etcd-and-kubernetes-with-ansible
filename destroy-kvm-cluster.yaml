@@ -1,0 +1,71 @@
+- hosts: localhost
+  gather_facts: no
+  vars_files: vars/kvm.yml
+  
+  tasks:
+
+    - name: Determine running VMs
+      virt:
+        command: "list_vms"
+      register: runningvms
+    
+    - name: Shut down running VMs
+      virt:
+        name: "{{ item.name }}"
+        state: destroyed
+      become: true
+      with_items: "{{ vm_definitions }}"
+      when: item.name in runningvms.list_vms
+
+    - name: Remove VM definitions
+      virt:
+        name: "{{ item.name }}"
+        command: undefine
+      become: true
+      with_items: "{{ vm_definitions }}"
+      when: item.name in runningvms.list_vms
+
+    - name: Clean up VM disk images
+      file:
+        path: /var/lib/libvirt/images/{{ item.name }}.img
+        state: absent
+      with_items: "{{ vm_definitions }}"
+      become: true
+
+    - name: Clean up VM cloud config ISOs
+      file:
+        path: /var/lib/libvirt/images/{{ item.name }}.iso
+        state: absent
+      with_items: "{{ vm_definitions }}"
+      become: true
+
+    - name: Clean up text version of cloud-config
+      file:
+        path: tmp/cloud-config-{{ item.name }}
+        state: absent
+      with_items: "{{ vm_definitions }}"
+
+    - name: Clean up network configuration text file
+      file:
+        path: tmp/network-config-{{ item.name }}
+        state: absent
+      with_items: "{{ vm_definitions }}"
+
+    - name: Remove resized image file
+      file: 
+        path: images/{{ local_image }}
+        state: absent
+
+    - name: Remove certificate directory if necessary
+      file:
+        path: tmp/certs
+        state: absent
+
+    - name: Update /etc/hosts file to remove the VMs just destroyed
+      lineinfile:
+        path: /etc/hosts
+        regexp: '{{ item.name }}'
+        line: "{{ item.ip }} {{ item.name }}.local {{ item.name }}"
+        state: absent
+      become: true
+      with_items: "{{ vm_definitions }}"

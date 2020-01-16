@@ -1,0 +1,67 @@
+- hosts: localhost
+  gather_facts: no
+  vars_files: vars/kvm.yml
+  
+  tasks:
+    
+    - name: Retrieve cloud image {{ image_version }}
+      get_url:
+        url: "{{ image_name }}"
+        dest: "images/{{ image_clean }}"
+        checksum: "{{ image_checksum }}" 
+
+    - name: Copy the original image so that we can edit it
+      shell: qemu-img convert -f qcow2 -O qcow2 images/{{ image_clean }} images/{{ local_image }}
+      args:
+        creates: images/{{ local_image }}
+
+    - name: Determine local image disk size
+      shell: qemu-img info images/{{ local_image }} | grep "virtual size" | awk '{print $3}'
+      register: virtsize
+      changed_when: false
+   
+    - name: If not 50G, resize image
+      shell: qemu-img resize images/{{ local_image }} 50G
+      when: "'50G' not in virtsize.stdout"
+
+    - name: Generate a cloud-config file for each VM node
+      template:
+        src: templates/cloud-config.j2
+        dest: tmp/cloud-config-{{ item.name }}
+      with_items: "{{ vm_definitions }}"
+
+    - name: Generate a network-config file for each VM node
+      template:
+        src: templates/network-config.j2
+        dest: tmp/network-config-{{ item.name }}
+      with_items: "{{ vm_definitions }}"
+
+    - name: Create a bootable ISO for each VM with the cloud-config and network-config in the libvirt image directory
+      shell: cloud-localds -v --network-config=tmp/network-config-{{ item.name }} /var/lib/libvirt/images/{{ item.name }}.iso tmp/cloud-config-{{ item.name }}
+      args:
+        creates: /var/lib/libvirt/images/{{ item.name }}.iso
+      with_items: "{{ vm_definitions }}"
+      become: yes
+
+    - name: Create virtual hard drive for each VM
+      shell: qemu-img convert -f qcow2 images/{{ local_image }} /var/lib/libvirt/images/{{ item.name }}.img
+      args:
+        creates: /var/lib/libvirt/images/{{ item.name }}.img
+      with_items: "{{ vm_definitions }}"
+      become: yes
+
+    - name: Create Virtual Machines
+      shell: >
+        virt-install --name {{ item.name }} --vcpus {{ item.cpus }} --memory {{ item.memory }} --disk /var/lib/libvirt/images/{{ item.name }}.img,device=disk,bus=virtio 
+        --disk /var/lib/libvirt/images/{{ item.name }}.iso,device=cdrom --os-type linux --os-variant ubuntu18.04 --virt-type kvm --graphics none --network bridge=br0,model=virtio 
+        --import --autostart --noautoconsole
+      become: true
+      with_items: "{{ vm_definitions }}"
+
+    - name: Update /etc/hosts file to contain the VMs just created
+      lineinfile:
+        path: /etc/hosts
+        regexp: '{{ item.name }}'
+        line: "{{ item.ip }} {{ item.name }}.local {{ item.name }}"
+      become: true
+      with_items: "{{ vm_definitions }}"

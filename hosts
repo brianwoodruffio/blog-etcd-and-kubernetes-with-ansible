@@ -1,0 +1,27 @@
+# This is the default ansible 'hosts' file.
+#
+# It should live in /etc/ansible/hosts
+#
+#   - Comments begin with the '#' character
+#   - Blank lines are ignored
+#   - Groups of hosts are delimited by [header] elements
+#   - You can enter hostnames or ip addresses
+#   - A hostname/ip can be a member of multiple groups
+
+[k8s:children]
+k8smaster
+k8sworker
+
+[k8smaster]
+k8snode1    ansible_user=ubuntu ansible_become=true
+
+[k8sworker]
+k8snode2    ansible_user=ubuntu ansible_become=true
+k8snode3    ansible_user=ubuntu ansible_become=true
+
+[etcdnodes]
+etcdnode1    ansible_user=ubuntu ansible_become=true
+etcdnode2    ansible_user=ubuntu ansible_become=true
+etcdnode3    ansible_user=ubuntu ansible_become=true
+
+

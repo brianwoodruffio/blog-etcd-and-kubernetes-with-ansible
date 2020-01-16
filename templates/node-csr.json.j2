@@ -1,0 +1,22 @@
+{
+    "key": {
+      "algo": "rsa",
+      "size": 2048
+    },
+    "names": [
+      {
+        "O": "etcd",
+        "OU": "etcd Security",
+        "L": "Philadelphia",
+        "ST": "Pennsylvania",
+        "C": "USA"
+      }
+    ],
+    "CN": "{{ item }}",
+    "hosts": [
+        {% for host in groups['etcdnodes'] %}
+            "{{ host }}"{% if not loop.last %},{% endif %}
+        {% endfor %}
+     
+    ]
+  }

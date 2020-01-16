@@ -1,0 +1,169 @@
+- hosts: k8s
+  gather_facts: no
+  vars_files: vars/kvm.yml
+  tasks: 
+
+  - name: Verify/Wait for VMs to be provisioned
+    wait_for_connection:
+
+  - name: Gathering facts
+    setup:
+
+  - name: Update /etc/hosts file to contain the VMs just created
+    lineinfile:
+      path: /etc/hosts
+      regexp: '{{ item.name }}'
+      line: "{{ item.ip }} {{ item.name }}.local {{ item.name }}"
+    become: true
+    with_items: "{{ vm_definitions }}"
+
+  - name: Add the Google APT signing key
+    apt_key:
+      url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+      state: present
+
+  - name: Add Kubernetes repository to system
+    apt_repository: 
+      repo: deb http://apt.kubernetes.io/ kubernetes-xenial main
+      state: present
+
+  - name: "Update APT and install docker and k8s tools"
+    apt:
+      update_cache: yes
+      pkg:
+        - docker.io
+        - apt-transport-https
+        - kubelet
+        - kubeadm
+        - kubernetes-cni
+
+  - name: Update docker to use systemd cgroups
+    copy: 
+      dest: /etc/docker/daemon.json
+      content: | 
+        {    
+          "exec-opts": ["native.cgroupdriver=systemd"],
+          "log-driver": "json-file",
+          "log-opts": {
+            "max-size": "100m"
+          },
+          "storage-driver": "overlay2"
+        }
+
+  - name: Create /etc/systemd/system/docker.service.d
+    file:
+      path: /etc/systemd/system/docker.service.d
+      state: directory
+      mode: '0755'
+
+  - name: restart systemd and enable docker
+    systemd:
+      daemon_reload: yes
+      name: docker
+      enabled: yes
+      state: restarted
+
+- hosts: k8smaster
+  
+  tasks:
+  - name: Load variables
+    include_vars:
+      dir: vars
+
+  - name: Create /etc/kubernetes/pki/etcd directory
+    file:
+      path: /etc/kubernetes/pki/etcd
+      state: directory
+      mode: '0755'
+
+  - name: Copy CA cert to master node
+    copy:
+      src: tmp/certs/etcd-root-ca.pem
+      dest: /etc/kubernetes/pki/etcd/ca.crt
+
+  - name: Copy apiserver-etcd-client.crt to k8smaster
+    copy:
+      src: tmp/certs/k8snode.pem
+      dest: /etc/kubernetes/pki/apiserver-etcd-client.crt
+
+  - name: Copy apiserver-etcd-client.crt to k8smaster
+    copy:
+      src: tmp/certs/k8snode.pem
+      dest: /etc/kubernetes/pki/apiserver-etcd-client.crt
+
+  - name: Copy apiserver-etcd-client.key to k8smaster
+    copy:
+      src: tmp/certs/k8snode-key.pem
+      dest: /etc/kubernetes/pki/apiserver-etcd-client.key
+
+  - name: Create kubeadm-config.yaml
+    template:
+      src: templates/kubeadm-config.yaml.j2
+      dest: /tmp/kubeadm-config.yaml
+
+#  - name: Fail here
+#    shell: "/bin/false"
+
+  - name: Initialize k8s (kubeadm init)
+    command: 
+      cmd: kubeadm init --ignore-preflight-errors=NumCPU --config /tmp/kubeadm-config.yaml --upload-certs
+      creates: /etc/kubernetes/admin.conf
+
+  - name: Generate join command
+    shell: kubeadm token create --print-join-command | grep join > /tmp/join_command
+    args:
+      creates: /tmp/join_command
+
+  - name: Pull join command local
+    fetch:
+      src: /tmp/join_command
+      dest: /tmp/join_command
+      flat: yes
+
+  - name: Copy kubeconfig local
+    fetch:
+      src: /etc/kubernetes/admin.conf
+      dest: ~/.kube/config
+      flat: yes
+
+- hosts: localhost
+  tasks:
+    - name: Create Weave.net password
+      shell: head -c 16 /dev/urandom | shasum -a 256 | cut -b1-50 | sudo tee /tmp/weave-passwd && 
+      args:
+        creates: /tmp/weave-passwd
+
+    - name: Determine if weave-passwd secret has been created in cluster
+      shell: kubectl get secret -n kube-system weave-passwd
+      register: weavepass
+      failed_when: false
+      changed_when: false
+
+    - name: Create weave-passwd secret
+      shell: kubectl create secret -n kube-system generic weave-passwd --from-file=/tmp/weave-passwd
+      when: "'not found' in weavepass.stderr"
+
+    - name: Determine if Weave.net is installed in cluster
+      shell: kubectl get pods -A | grep weave-net
+      register: weavenet
+      changed_when: false
+      failed_when: false
+
+    - name: Install Weave.net
+      shell: |
+        kubectl apply -f "https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n')&password-secret=weave-passwd"
+      when: weavenet.rc != 0
+      
+- hosts: k8sworker
+
+  tasks:
+    - name: Copy join command to host
+      copy:
+        src: /tmp/join_command
+        dest: /tmp/join_command
+
+    - name: Join worker to cluster
+      shell: sh /tmp/join_command && rm /tmp/join_command
+      args:
+        creates: /etc/kubernetes/kubelet.conf
+

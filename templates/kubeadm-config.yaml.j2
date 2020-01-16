@@ -1,0 +1,13 @@
+apiVersion: kubeadm.k8s.io/v1beta2
+kind: ClusterConfiguration
+kubernetesVersion: stable
+controlPlaneEndpoint: "k8snode1:6443"
+etcd:
+    external:
+        endpoints:
+{% for i in (vm_definitions | selectattr('name','match','^etcd*') | map(attribute='ip') | list) %}
+        - https://{{ i }}:2379
+{% endfor %}
+        caFile: /etc/kubernetes/pki/etcd/ca.crt
+        certFile: /etc/kubernetes/pki/apiserver-etcd-client.crt
+        keyFile: /etc/kubernetes/pki/apiserver-etcd-client.key

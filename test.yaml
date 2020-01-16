@@ -1,0 +1,11 @@
+- hosts: localhost
+  gather_facts: no
+  tasks:
+
+    - name: Load variables
+      include_vars:
+        dir: vars
+
+    - name: Debugging vars
+      debug:
+        msg: "{{ vm_definitions | selectattr('name','match','^etcd*') | map(attribute='ip') | join(',') }}"

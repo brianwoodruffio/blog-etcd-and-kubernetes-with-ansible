@@ -1,0 +1,142 @@
+- hosts: localhost
+  gather_facts: no
+  tasks:
+    - name: Install cfssl tool
+      apt:
+        update_cache: yes
+        pkg:
+          - golang-cfssl
+      become: yes
+
+    - name: Create certs directory
+      file: 
+        path: tmp/certs
+        state: directory
+
+    - name: Copy in root CA signing request
+      template:
+        src: templates/etcd-root-ca-csr.json.j2
+        dest: tmp/certs/etcd-root-ca-csr.json
+        
+    - name: Generate self-signed root CA from request
+      shell: cfssl gencert --initca=true tmp/certs/etcd-root-ca-csr.json | cfssljson --bare tmp/certs/etcd-root-ca
+      args:
+        creates: tmp/certs/etcd-root-ca.pem
+
+    - name: Copy in gencert configuration
+      template:
+        src: templates/etcd-gencert.json.j2
+        dest: tmp/certs/etcd-gencert.json
+
+    - name: Create certificate requests for the individual nodes
+      template:
+        src: templates/node-csr.json.j2
+        dest: tmp/certs/{{ item }}-ca-csr.json
+      with_items: "{{ groups['etcdnodes'] }}"
+
+    - name: Create certificate request for k8s clients
+      template:
+        src: templates/node-csr.json.j2
+        dest: tmp/certs/{{ item }}-ca-csr.json
+      with_items:
+        - "k8snode"
+
+    - name: Load variables
+      include_vars:
+        dir: vars
+
+    - name: Sign certificates for individual nodes
+      shell: |
+        cfssl gencert \
+        --ca tmp/certs/etcd-root-ca.pem \
+        --ca-key tmp/certs/etcd-root-ca-key.pem \
+        --config tmp/certs/etcd-gencert.json \
+        --hostname={{ vm_definitions | selectattr('name','match','^etcd*') | map(attribute='ip') | join(',') }} \
+        tmp/certs/{{ item }}-ca-csr.json | cfssljson --bare tmp/certs/{{ item }}
+      args:
+        creates: tmp/certs/{{ item }}.pem
+      with_items: "{{ groups['etcdnodes'] }}"
+
+    - name: Sign certificate for k8s client nodes
+      shell: |
+        cfssl gencert \
+        --ca tmp/certs/etcd-root-ca.pem \
+        --ca-key tmp/certs/etcd-root-ca-key.pem \
+        --config tmp/certs/etcd-gencert.json \
+        --hostname={{ vm_definitions | selectattr('name','match','^etcd*') | map(attribute='ip') | join(',') }} \
+        tmp/certs/{{ item }}-ca-csr.json | cfssljson --bare tmp/certs/{{ item }}
+      args:
+        creates: tmp/certs/{{ item }}.pem
+      with_items: 
+        - "k8snode"
+
+
+- hosts: etcdnodes
+  gather_facts: no
+  become: yes
+  tasks: 
+
+  - name: Verify/Wait for VMs to be provisioned
+    wait_for_connection:
+
+  - name: Gathering facts
+    setup:
+
+  - name: Load variables
+    include_vars:
+      dir: vars
+
+  - name: Create /etc/etcd/certs directory
+    file:
+      path: /etc/etcd/certs
+      state: directory
+      mode: '0750'
+
+  - name: Copy CA cert to nodes
+    copy:
+      src: tmp/certs/etcd-root-ca.pem
+      dest: /etc/etcd/certs
+
+  - name: Copy certificates to servers
+    copy:
+      src: "tmp/certs/{{ inventory_hostname }}{{ item }}"
+      dest: /etc/etcd/certs
+      owner: root
+      mode: 0600
+    with_items: 
+      - "-key.pem"
+      - ".pem"
+
+  - name: Retrieve etcd executable image {{ ETCD_VER }}
+    get_url:
+      url: "{{ ETCD_DOWNLOAD_URL }}"
+      dest: "/tmp/{{ ETCD_ZIP }}"
+
+  - name: Unarchive the etcd install
+    unarchive:
+      src: /tmp/{{ ETCD_ZIP }}
+      dest: /tmp
+      remote_src: yes
+
+  - name: Move etcd binaries to /usr/local/bin
+    copy:
+      src: /tmp/{{ ETCD_DIR }}/{{ item }}
+      dest: /usr/local/bin/{{ item }}
+      remote_src: yes
+      mode: 0755
+    with_items:
+      - "etcd"
+      - "etcdctl"
+
+  - name: Create systemd configuration for etcd
+    template:
+      src: templates/etcd.service.j2
+      dest: /etc/systemd/system/etcd.service
+
+  - name: restart systemd and enable etcd
+    systemd:
+      daemon_reload: yes
+      name: etcd
+      enabled: yes
+      state: restarted
+

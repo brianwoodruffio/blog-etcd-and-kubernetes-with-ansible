@@ -1,0 +1,31 @@
+[Unit]
+Description=etcd
+Documentation=https://github.com/coreos/etcd
+
+[Service]
+Type=notify
+Restart=always
+RestartSec=5s
+LimitNOFILE=40000
+TimeoutStartSec=0
+
+ExecStart=/usr/local/bin/etcd --name {{ inventory_hostname }} \
+  --data-dir /var/lib/etcd \
+  --listen-client-urls https://{{ ansible_facts.ens2.ipv4.address }}:2379 \
+  --advertise-client-urls https://{{ ansible_facts.ens2.ipv4.address }}:2379 \
+  --listen-peer-urls https://{{ ansible_facts.ens2.ipv4.address }}:2380 \
+  --initial-advertise-peer-urls https://{{ ansible_facts.ens2.ipv4.address }}:2380 \
+  --initial-cluster {% for host in groups['etcdnodes'] %}{{ host }}=https://{{ hostvars[host]['ansible_all_ipv4_addresses'][0] }}:2380{% if not loop.last %},{% endif %}{% endfor %} \
+  --initial-cluster-token tkn \
+  --initial-cluster-state new \
+  --client-cert-auth \
+  --trusted-ca-file /etc/etcd/certs/etcd-root-ca.pem \
+  --cert-file /etc/etcd/certs/{{ inventory_hostname }}.pem \
+  --key-file /etc/etcd/certs/{{ inventory_hostname }}-key.pem \
+  --peer-client-cert-auth \
+  --peer-trusted-ca-file /etc/etcd//certs/etcd-root-ca.pem \
+  --peer-cert-file /etc/etcd/certs/{{ inventory_hostname }}.pem \
+  --peer-key-file /etc/etcd/certs/{{ inventory_hostname }}-key.pem
+
+[Install]
+WantedBy=multi-user.target

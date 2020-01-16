@@ -1,0 +1,32 @@
+---
+image_version: Ubuntu 18.04
+image_name: https://cloud-images.ubuntu.com/bionic/current/bionic-server-cloudimg-amd64.img
+image_checksum: sha256:6afb97af96b671572389935d6579557357ad7bbf2c2dd2cb52879c957c85dbee
+image_clean: bionic-server-cloudimg-amd64.img
+local_image: bionic-server-cloudimg-amd64-local.img
+ssh_public_key: "{{ lookup('file', '~/.ssh/id_rsa.pub') }}"
+vm_definitions:
+  - name: k8snode1
+    memory: 2048
+    cpus: 1
+    ip: 192.168.1.12
+  - name: k8snode2
+    memory: 2048
+    cpus: 1
+    ip: 192.168.1.13
+  - name: k8snode3
+    memory: 2048
+    cpus: 1
+    ip: 192.168.1.14
+  - name: etcdnode1
+    memory: 2048
+    cpus: 1
+    ip: 192.168.1.15
+  - name: etcdnode2
+    memory: 2048
+    cpus: 1
+    ip: 192.168.1.16
+  - name: etcdnode3
+    memory: 2048
+    cpus: 1
+    ip: 192.168.1.17
